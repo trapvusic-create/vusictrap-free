@@ -1,121 +1,89 @@
-
-# VusicTrap FREE - Servidor de Radio Gratis para IMVU
-# Substitui o Vusic pago
-# Room: 363074242 - Dono: ztk
-
+Python
 from flask import Flask, redirect, request, jsonify, Response
 import yt_dlp
 import requests
-
 app = Flask(__name__)
-
-# Guarda musica atual
 current_song = {
-    "title": "Nenhuma musica - Use !play no bot",
+    "title": "Nenhuma musica - Use /set?url=NOME",
     "youtube_url": "",
     "audio_url": "",
     "requester": "ztk"
 }
-
-ydl_opts = {
-    'format': 'bestaudio/best',
-    'noplaylist': True,
-    'quiet': True,
-    'default_search': 'ytsearch'
-}
-
-def get_audio_url(youtube_url_or_search):
-    # Se for pesquisa, procura primeiro
-    if not youtube_url_or_search.startswith("http"):
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch1:{youtube_url_or_search}", download=False)
-            if info and 'entries' in info and info['entries']:
+def get_audio_url(query):
+    try:
+        if "youtube.com" in query or "youtu.be" in query:
+            youtube_url = query
+        else:
+            ydl_opts_search = {
+                'format': 'bestaudio/best',
+                'noplaylist': True,
+                'quiet': True,
+                'default_search': 'ytsearch1',
+                'no_warnings': True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
+                info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+                if not info or 'entries' not in info or not info['entries']:
+                    return None, None
                 v = info['entries'][0]
-                youtube_url_or_search = f"https://www.youtube.com/watch?v={v['id']}"
-                title = v.get('title')
-            else:
+                youtube_url = f"https://www.youtube.com/watch?v={v['id']}"
+        ydl_opts = {
+            'format': 'bestaudio[ext=m4a]/bestaudio/best',
+            'noplaylist': True,
+            'quiet': True,
+            'no_warnings': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(youtube_url, download=False)
+            if not info:
                 return None, None
-    else:
-        title = youtube_url_or_search
-
-    # Extrai URL direto de audio do YouTube
-    ydl_opts_audio = {
-        'format': 'bestaudio/best',
-        'noplaylist': True,
-        'quiet': True,
-    }
-    with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
-        try:
-            info = ydl.extract_info(youtube_url_or_search, download=False)
-            # Pega melhor URL de audio
             audio_url = info.get('url')
+            title = info.get('title', 'Musica')
             if not audio_url and 'formats' in info:
-                # Pega formato audio
-                for f in info['formats']:
-                    if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
+                for f in reversed(info['formats']):
+                    if f.get('acodec') != 'none' and f.get('url'):
                         audio_url = f['url']
                         break
-                if not audio_url:
-                    audio_url = info['formats'][-1]['url']
-            
-            title = info.get('title', title)
             return audio_url, title
-        except Exception as e:
-            print(f"Erro: {e}")
-            return None, None
-
+    except Exception as e:
+        print(f"Erro: {e}")
+        return None, None
 @app.route('/')
 def index():
-    return f"""
-    <h1>VusicTrap FREE - TRAPST*R - Room 363074242</h1>
-    <p>Dono: ztk</p>
-    <p><b>Agora a tocar:</b> {current_song['title']}</p>
-    <p>Para usar no IMVU, cola isto no Radio Streaming e clica LOAD:</p>
-    <code style="background:#000;color:#0f0;padding:10px;">{request.host_url}radio</code>
-    <p>Para trocar musica, usa o bot ou acessa: {request.host_url}set?url=NOME_DA_MUSICA</p>
-    <p>Ex: {request.host_url}set?url=matue%20-%20777</p>
-    """
-
+    host = request.host_url
+    return f"<h1>VusicTrap FREE - {current_song['title']}</h1><p>Radio: {host}radio</p><p>Trocar: {host}set?url=NOME</p>"
 @app.route('/radio')
 def radio():
-    """Este é o link que colas no IMVU - NUNCA da failed to load"""
     if not current_song['audio_url']:
-        return "Nenhuma musica definida. Use /set?url=NOME", 200
-    
-    # Redireciona para o audio direto do YouTube (IMVU aceita)
-    # Ou faz proxy do audio
+        return "Nenhuma musica. Use /set?url=matue", 200
     try:
-        # Faz proxy para garantir que IMVU aceita
-        r = requests.get(current_song['audio_url'], stream=True, timeout=10)
-        return Response(r.iter_content(chunk_size=8192), content_type=r.headers.get('Content-Type', 'audio/mpeg'))
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        r = requests.get(current_song['audio_url'], stream=True, headers=headers, timeout=15)
+        def generate():
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        return Response(generate(), content_type=r.headers.get('Content-Type', 'audio/mp4'))
     except:
-        # Se proxy falhar, redireciona
         return redirect(current_song['audio_url'])
-
 @app.route('/set')
 def set_song():
-    """Define nova musica: /set?url=matue ou /set?url=https://youtube.com/..."""
-    query = request.args.get('url', '')
-    if not query:
-        return "Falta ?url=", 400
-    
-    audio_url, title = get_audio_url(query)
-    if not audio_url:
-        return f"Nao encontrei: {query}", 404
-    
-    current_song['audio_url'] = audio_url
-    current_song['title'] = title
-    current_song['youtube_url'] = query
-    current_song['requester'] = request.args.get('by', 'ztk')
-    
-    return jsonify({"status": "ok", "now_playing": title, "radio_url": request.host_url + "radio"})
-
+    try:
+        query = request.args.get('url', '')
+        if not query:
+            return jsonify({"error": "Falta ?url="}), 400
+        audio_url, title = get_audio_url(query)
+        if not audio_url:
+            return jsonify({"error": f"Nao encontrei {query}"}), 404
+        current_song['audio_url'] = audio_url
+        current_song['title'] = title
+        return jsonify({"status": "ok", "now_playing": title, "radio_url": request.host_url + "radio"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 @app.route('/status')
 def status():
     return jsonify(current_song)
-
 if __name__ == '__main__':
-    # Render usa PORT env
     import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
