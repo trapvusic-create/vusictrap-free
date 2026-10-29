@@ -1,4 +1,3 @@
-Python
 from flask import Flask, redirect, request, jsonify, Response
 import yt_dlp
 import requests
